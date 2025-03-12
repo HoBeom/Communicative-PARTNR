@@ -54,7 +54,7 @@ jobs:
         isort habitat_llm/. dataset_generation/. --check-only
 
   install_and_test_ubuntu:
-    runs-on: 4-core-ubuntu-gpu-t4
+    runs-on: self-hosted
     defaults:
       run:
         shell: bash -el {0}
