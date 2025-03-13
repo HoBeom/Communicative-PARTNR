@@ -71,6 +71,7 @@ jobs:
         conda install -y pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 pytorch-cuda=12.4 -c pytorch -c nvidia
         echo "Validating Pytorch Installation"
         # Check that pytorch is installed with CUDA.
+        pip install numpy==1.26.4
         python -c 'import torch; torch.cuda.set_device(0)'
     - name: Install habitat-sim version tag
       run: |-
