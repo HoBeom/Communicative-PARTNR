@@ -54,7 +54,7 @@ jobs:
         isort habitat_llm/. dataset_generation/. --check-only
 
   install_and_test_ubuntu:
-    runs-on: self-hosted
+    runs-on: 4-core-ubuntu-gpu-t4
     defaults:
       run:
         shell: bash -el {0}
@@ -63,7 +63,7 @@ jobs:
       with:
         path: "./partnr-planner"
     - uses: "./partnr-planner/.github/actions/install_ubuntu_deps"
-    # - uses: "./partnr-planner/.github/actions/install_ubuntu_gpu_deps"
+    - uses: "./partnr-planner/.github/actions/install_ubuntu_gpu_deps"
     - name: Install pytorch
       run: |-
         export PATH=$HOME/miniconda/bin:/usr/local/cuda/bin:$PATH
@@ -71,7 +71,6 @@ jobs:
         conda install -y pytorch==2.4.1 torchvision==0.19.1 torchaudio==2.4.1 pytorch-cuda=12.4 -c pytorch -c nvidia
         echo "Validating Pytorch Installation"
         # Check that pytorch is installed with CUDA.
-        pip install numpy==1.26.4
         python -c 'import torch; torch.cuda.set_device(0)'
     - name: Install habitat-sim version tag
       run: |-
@@ -136,7 +135,10 @@ jobs:
         export PATH=$HOME/miniconda/bin:/usr/local/cuda/bin:$PATH
         conda activate partnr
         cd partnr-planner
-        python -m pytest -s habitat_llm/tests
+        for test_file in *.py; do
+            echo ">>> Running test: $test_file"
+            python "$test_file" || { echo "Test failed: $test_file"; exit 1; }
+        done
         python -m pytest dataset_generation/tests
     #NOTE: use the below to debug with ssh: simply move this "job" just before the crashing job to intercept the workflow
     #- name: Debugging with tmate
