@@ -5,17 +5,15 @@
 # LICENSE file in the root directory of this source tree
 
 import subprocess
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 from omegaconf import DictConfig
 
 try:
-    from rlm.llm import RemoteLanguageModel
-
-    from habitat_llm.llm.rlm_lock import RemotePoolLanguageModel
+    from habitat_llm.llm.rlm_lock import RemoteLanguageModel, RemotePoolLanguageModel
 except ImportError:
-    RemoteLanguageModel = None
+    RemoteLanguageModel = None  # type: ignore
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from habitat_llm.llm.base_llm import BaseLLM, Prompt
@@ -41,9 +39,7 @@ class VLMHFModel(BaseLLM):
 
     def init_remote_model(self):
         if self.llm_conf.serverdir == "":
-            host, port = self.llm_conf.host, self.llm_conf.port
-            RLM_API_ADDRESS = f"http://{host}:{port}"
-            self.model = RemoteLanguageModel(RLM_API_ADDRESS)
+            self.model = RemoteLanguageModel(self.llm_conf)
         else:
             serverdir = self.llm_conf.serverdir
             self.model = RemotePoolLanguageModel(serverdir)
@@ -169,49 +165,76 @@ class VLMHFModel(BaseLLM):
             self.generation_params.temperature = 0.1
             self.generation_params.do_sample = False
 
-        self.response_raw: Dict[str, Any] = {}
-        if self.generation_params.batch_response:
-            self.batch_response = []
-            # Repeat generation
-            for _ in range(self.generation_params.n):
-                self.response_raw = self.model.generate(
-                    prompt=prompt,
-                    max_new_tokens=max_length,
-                    temperature=self.generation_params.temperature,
-                    sampling=self.generation_params.do_sample,
-                    generation_args=generation_args,
-                )
-                generation = self.response_raw["generation"]
-                # Split using stop word or multiple stop words from a list.
-                if isinstance(stop, str):
-                    generation = generation.split(stop)[0]
-                else:
-                    for s in stop:
-                        if s in generation:
-                            generation = generation.split(s)[0]
-                            break
-                # remove white spaces at the end
-                generation = generation.rstrip()
-                self.batch_response.append(generation)
-        else:
-            self.response_raw = self.model.generate(
-                prompt=prompt,
+        def _call_model(p: "Prompt") -> Dict[str, Any]:
+            return self.model.generate(
+                prompt=p,
                 max_new_tokens=max_length,
                 temperature=self.generation_params.temperature,
                 sampling=self.generation_params.do_sample,
                 generation_args=generation_args,
             )
-            generation = self.response_raw["generation"]
-            # Split using stop word or multiple stop words from a list.
-            if isinstance(stop, str):
-                generation = generation.split(stop)[0]
-            else:
-                for s in stop:
-                    if s in generation:
-                        generation = generation.split(s)[0]
-                        break
-            # remove white spaces at the end
-            generation = generation.rstrip()
+
+        def _split_on_stop(
+            text: str, stopper: Optional[Union[str, Iterable[str]]]
+        ) -> str:
+            if not stopper:
+                return text.rstrip()
+            if isinstance(stopper, str):
+                return text.split(stopper)[0].rstrip()
+            try:
+                for s in stopper:
+                    if s and s in text:
+                        return text.split(s)[0].rstrip()
+            except TypeError:
+                return text.rstrip()
+            return text.rstrip()
+
+        if self.generation_params and "start" in self.generation_params:
+            start = self.generation_params["start"]
+        else:
+            start = None
+
+        def _split_on_start(
+            text: str, starter: Optional[Union[str, Iterable[str]]]
+        ) -> Tuple[str, Optional[str]]:
+            """
+            Remove reasoning tag block (if present) and split text on start tokens.
+            Returns (clean_text, reasoning_part)
+            """
+            if not starter:
+                return text.rstrip(), None
+            if isinstance(starter, str):
+                parts = text.split(starter)
+                if len(parts) > 1:
+                    print("[Debug] Splitting on start token:", starter)
+                    print("[Debug] Reasoning part:", parts[0])
+                    print("[Debug] Final answer part:", parts[-1])
+                    return parts[-1].rstrip(), parts[0]
+                else:
+                    return text.rstrip(), None
+            try:
+                for s in starter:
+                    if s and s in text:
+                        return text.split(s)[0].rstrip(), s
+            except TypeError:
+                return text.rstrip(), None
+            return text.rstrip(), None
+
+        self.response_raw: Dict[str, Any] = {}
+        if self.generation_params.batch_response:
+            self.batch_response = []
+            # Repeat generation
+            for _ in range(self.generation_params.n):
+                self.response_raw = _call_model(prompt)
+                generation = self.response_raw.get("generation", "")
+                generation = _split_on_stop(generation, stop)
+                generation, _ = _split_on_start(generation, start)
+                self.batch_response.append(generation)
+        else:
+            self.response_raw = _call_model(prompt)
+            generation = self.response_raw.get("generation", "")
+            generation = _split_on_stop(generation, stop)
+            generation, _ = _split_on_start(generation, start)
             self.response = generation
 
     def get_logprobs(self):

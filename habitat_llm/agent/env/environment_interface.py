@@ -118,6 +118,12 @@ class EnvironmentInterface:
         self.batch = self.__parse_observations(obs)
         # self.reset_environment()
 
+        # message
+        self._message_board = []  # List to store messages
+        self._directed_messages = defaultdict(list)
+        self._agent_message_count = defaultdict(int)  # Counter for messages per agent
+        self._message_count = 0  # Counter for all messages
+
         # Container to store state history of both agents
         self.agent_state_history = defaultdict(list)
 
@@ -138,6 +144,85 @@ class EnvironmentInterface:
         self.trajectory_save_prefix: str = None
         self._trajectory_idx: int = None
         self._setup_current_episode_logging: bool = False
+
+    def broadcast_message(self, sender_id: int, message: str):
+        """Store a message to the message board with sender identification."""
+        self._message_count += 1
+        self._message_board.append(
+            {"count": self._message_count, "sender": sender_id, "message": message}
+        )
+
+    def send_message_to_agent(
+        self, sender_id: int, receiver_id: int, message: str
+    ) -> None:
+        """
+        Store a message directed specifically to a receiver agent.
+        """
+        self._message_count += 1
+        self._directed_messages[receiver_id].append(
+            {"count": self._message_count, "sender": sender_id, "message": message}
+        )
+
+    def get_new_messages(self, receiver_id: int):
+        """
+        Retrieve all new messages for the receiver, including:
+        - Broadcast messages (sent to everyone except self)
+        - Directed messages (sent specifically to receiver)
+        """
+        messages = []
+
+        # --- 1. Broadcast messages --- # Not used in a 2-agent setup
+        new_broadcasts = [
+            msg
+            for msg in self._message_board
+            if msg["count"] > self._agent_message_count[receiver_id]
+            and msg.get("sender") != receiver_id
+        ]
+        if new_broadcasts:
+            self._agent_message_count[receiver_id] = new_broadcasts[-1]["count"]
+            messages.extend(new_broadcasts)
+
+        # --- 2. Directed messages ---
+        if hasattr(self, "_directed_messages"):
+            directed = self._directed_messages.get(receiver_id, [])
+            messages.extend(directed)
+
+            # Once retrieved, clear directed messages for this receiver
+            self._directed_messages[receiver_id] = []
+
+        return messages
+
+    def set_planner(self, agent_uid: int, planner):
+        """
+        Register a planner instance for a specific agent ID.
+        """
+        if not hasattr(self, "_agent_planners"):
+            self._agent_planners = {}
+        self._agent_planners[agent_uid] = planner
+
+    def can_wake_up_agent(self, agent_uid: int) -> bool:
+        """
+        Check if an agent's planner supports waking up and is currently done.
+        """
+        if (
+            not hasattr(self, "_agent_planners")
+            or agent_uid not in self._agent_planners
+        ):
+            return False
+        planner = self._agent_planners[agent_uid]
+        return planner.wake_up and planner.is_done
+
+    def wake_up_agent(self, agent_uid: int) -> bool:
+        """
+        Actually wake up the agent.
+        """
+        if (
+            not hasattr(self, "_agent_planners")
+            or agent_uid not in self._agent_planners
+        ):
+            return False
+        planner = self._agent_planners[agent_uid]
+        return planner.notify_agent_wakeup()
 
     def initialize_perception_and_world_graph(self):
         """
@@ -407,9 +492,10 @@ class EnvironmentInterface:
                                 self.trajectory_save_paths[curr_agent], "panoptic"
                             )
                         )
-                    os.makedirs(
-                        os.path.join(self.trajectory_save_paths[curr_agent], "pose")
-                    )
+                    if "pose" in self.save_options:
+                        os.makedirs(
+                            os.path.join(self.trajectory_save_paths[curr_agent], "pose")
+                        )
 
     def get_final_action_vector(
         self, low_level_actions: Dict[str, np.ndarray]
@@ -586,11 +672,11 @@ class EnvironmentInterface:
                     else:
                         rgb = obs[f"{curr_agent}_{camera_source}_rgb"]
                     np.save(
-                        f"{self.trajectory_save_paths[curr_agent]}/rgb/{self._trajectory_idx}.npy",
+                        f"{self.trajectory_save_paths[curr_agent]}/rgb/{camera_source}_{self._trajectory_idx:05d}.npy",
                         rgb,
                     )
                     imageio.imwrite(
-                        f"{self.trajectory_save_paths[curr_agent]}/rgb/{self._trajectory_idx}.jpg",
+                        f"{self.trajectory_save_paths[curr_agent]}/rgb/{camera_source}_{self._trajectory_idx:05d}.jpg",
                         rgb,
                     )
                 if "depth" in self.save_options:
@@ -621,23 +707,23 @@ class EnvironmentInterface:
                         panoptic,
                     )
                 # NOTE: this assumes poses for head_rgb and head_depth are the exact
-                # same
-                if self._single_agent_mode:
-                    pose = np.linalg.inv(
-                        self.sim.agents[0]
-                        ._sensors[f"{camera_source}_rgb"]
-                        .render_camera.camera_matrix
+                if "pose" in self.save_options:
+                    if self._single_agent_mode:
+                        pose = np.linalg.inv(
+                            self.sim.agents[0]
+                            ._sensors[f"{camera_source}_rgb"]
+                            .render_camera.camera_matrix
+                        )
+                    else:
+                        pose = np.linalg.inv(
+                            self.sim.agents[0]
+                            ._sensors[f"{curr_agent}_{camera_source}_rgb"]
+                            .render_camera.camera_matrix
+                        )
+                    np.save(
+                        f"{self.trajectory_save_paths[curr_agent]}/pose/{self._trajectory_idx}.npy",
+                        pose,
                     )
-                else:
-                    pose = np.linalg.inv(
-                        self.sim.agents[0]
-                        ._sensors[f"{curr_agent}_{camera_source}_rgb"]
-                        .render_camera.camera_matrix
-                    )
-                np.save(
-                    f"{self.trajectory_save_paths[curr_agent]}/pose/{self._trajectory_idx}.npy",
-                    pose,
-                )
                 # NOTE: another way of accessing camera pose
                 # fixed_pose = get_camera_transform(
                 #     self.sim.agents_mgr._all_agent_data[

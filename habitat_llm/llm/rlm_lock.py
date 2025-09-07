@@ -7,10 +7,142 @@
 import json
 import os
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import filelock
-from rlm.llm import RemoteLanguageModel
+
+# from rlm.llm import RemoteLanguageModel
+import requests
+from omegaconf import DictConfig
+
+
+class RemoteLanguageModel:
+    """
+    RemoteLanguageModel communicates with a remote vLLM server to generate text.
+    """
+
+    def __init__(self, conf: DictConfig, chat: bool = False):
+        self.llm_conf = conf
+        host, port = self.llm_conf.host, self.llm_conf.port
+        self.generation_params = self.llm_conf.generation_params
+        self.model_name = self.generation_params.engine
+        self.api_address = f"http://{host}:{port}"
+        self.chat = chat
+
+    def generate(
+        self,
+        prompt: str,
+        stop: Optional[str] = None,
+        max_new_tokens: Optional[int] = 250,
+        temperature: Optional[float] = 0.0,  # ignore temperature
+        sampling: Optional[bool] = False,  # ignore sampling
+        generation_args: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generates text for a single prompt by calling batch_generate() and returning the first result.
+
+        :param prompt: The input prompt (already containing all necessary tags).
+        :param max_new_tokens: The maximum number of tokens to generate.
+        :param temperature: Temperature for generation.
+        :param sampling: Whether to use sampling.
+        :param generation_args: Additional generation parameters to include in the payload.
+        :return: A dictionary with the generated text (e.g., {"generation": "generated text"}).
+        """
+        if self.chat:
+            raise NotImplementedError("Chat not implemented yet")
+            return self.batch_chat_generate(
+                [prompt], stop, max_new_tokens, generation_args=generation_args
+            )[0]
+        return self.batch_generate(
+            [prompt], max_new_tokens, generation_args=generation_args  # type: ignore[arg-type]
+        )[0]
+
+    def batch_generate(
+        self,
+        prompts: List[str],
+        stop: Optional[str] = None,
+        max_length: Optional[int] = 250,
+        generation_args: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generates text for multiple prompts by sending a request to the remote LLM server.
+        Extra parameters in generation_args are merged into the payload.
+
+        :param
+        prompts: A list of input prompts (each already formatted with necessary tags).
+        :param max_length: Maximum number of tokens to generate.
+        :param temperature: Temperature for generation.
+        :param sampling: Whether to use sampling.
+        :param generation_args: Additional generation parameters (e.g., repetition_penalty, top_k, etc.).
+        :return: A list of dictionaries, each containing a "generation" field with the generated text.
+        """
+
+        headers = {"Content-Type": "application/json"}
+        results = []
+        url = f"{self.api_address}/v1/completions"
+        try:
+            for prompt in prompts:
+                payload = {
+                    "model": self.model_name,
+                    "prompt": prompt,
+                    "max_tokens": max_length,
+                    "temperature": 0.0,
+                    "n": 1,
+                }
+                # if generation_args:
+                #     payload.update(generation_args)
+                response = requests.post(url, headers=headers, json=payload, timeout=40)
+                response.raise_for_status()
+                result = response.json()
+                generated_text = result["choices"][0]["text"]
+                results.append({"generation": generated_text})
+        except Exception as e:
+            results.append({"generation": f"Error calling remote model: {e}"})
+
+        return results
+
+    def batch_chat_generate(
+        self,
+        prompts: List[str],
+        stop: Optional[str] = None,
+        max_length: Optional[int] = 250,
+        generation_args: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Generates text for multiple prompts by sending a request to the remote LLM server.
+        Extra parameters in generation_args are merged into the payload.
+
+        :param prompts: A list of input prompts (each already formatted with necessary tags).
+        :param max_length: Maximum number of tokens to generate.
+        :param temperature: Temperature for generation.
+        :param sampling: Whether to use sampling.
+        :param generation_args: Additional generation parameters (e.g., repetition_penalty, top_k, etc.).
+        :return: A list of dictionaries, each containing a "generation" field with the generated text.
+        """
+        headers = {"Content-Type": "application/json"}
+        results = []
+        url = f"{self.api_address}/v1/chat/completions"
+        try:
+            for prompt in prompts:
+                payload = {
+                    "model": self.model_name,
+                    # TODO system prompt should be separate.
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": max_length,
+                    "temperature": 0.0,
+                    "n": 1,
+                }
+                if generation_args:
+                    payload.update(generation_args)
+                response = requests.post(url, headers=headers, json=payload, timeout=40)
+                response.raise_for_status()
+                result = response.json()
+                generated_text = result["choices"][0]["message"]["content"]
+                results.append({"generation": generated_text})
+        except Exception as e:
+            results.append({"generation": f"Error calling remote model: {e}"})
+
+        return results
 
 
 class RemotePoolLanguageModel(RemoteLanguageModel):
@@ -69,7 +201,7 @@ class RemotePoolLanguageModel(RemoteLanguageModel):
             with open(lockfile, "w+") as f:
                 f.write(json.dumps(content))
 
-    def batch_generate(
+    def batch_generate(  # type: ignore[override]
         self,
         prompts: List[str],
         max_new_tokens: int,
@@ -92,11 +224,11 @@ class RemotePoolLanguageModel(RemoteLanguageModel):
         # Get the llm with fewer calls
         self.address = self.get_address_with_shortest_queue()
         # Run the llm with te given prompt
-        result = super().batch_generate(
+        result = super().batch_generate(  # type: ignore[misc]
             prompts,
-            max_new_tokens,
-            temperature,
-            sampling,
+            max_new_tokens,  # type: ignore[arg-type]
+            temperature,  # type: ignore[arg-type]
+            sampling,  # type: ignore[arg-type]
             generation_args=generation_args,
         )
         # Free that llm in the json file.

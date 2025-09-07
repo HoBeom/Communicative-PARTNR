@@ -1,0 +1,10 @@
+# The tag below must match file name!
+send_message_tool:
+  _target_   : habitat_llm.tools.perception.SendMessageTool
+  _recursive_: False
+  skill_config:
+    description: 'Used to send a cooperative message to another agent. You need to provide the cooperative request or information inside square brackets. Example: SendMessageTool[Message_content].'
+    name: SendMessageTool
+    prompt: Message_Gen # Not used for message generation
+    speech_recognition_range: 0.0
+    system_feedback_mode: 'Opaque' # Opaque, Binary, Causal, Traceable

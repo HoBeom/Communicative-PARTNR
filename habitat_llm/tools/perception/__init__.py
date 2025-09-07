@@ -10,3 +10,4 @@ from habitat_llm.tools.perception.find_receptacle_tool import (  # noqa: F401
     FindReceptacleTool,
 )
 from habitat_llm.tools.perception.find_room_tool import FindRoomTool  # noqa: F401
+from habitat_llm.tools.perception.send_message_tool import SendMessageTool  # noqa: F401

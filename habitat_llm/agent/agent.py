@@ -190,6 +190,8 @@ class Agent:
         :param action_input: The argument of the action
         :param observations: current agent observations
         """
+        # Add agent_id to observations for communication
+        observations["agent_id"] = self.uid
         # Fetch tool corresponding to the action
         try:
             tool = self.get_tool_from_name(action)

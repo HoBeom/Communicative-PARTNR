@@ -6,7 +6,8 @@
 
 import os
 import time
-from typing import Any, Dict, List, Tuple
+from collections import defaultdict
+from typing import Any, DefaultDict, Dict, List, Tuple
 
 import cv2
 import imageio
@@ -43,6 +44,14 @@ class DebugVideoUtil:
         self.num_agents = 0
         for _agent_conf in self.env_interface.conf.evaluation.agents.values():
             self.num_agents += 1
+
+        self.previous_action: DefaultDict[int, List[Tuple[str, Any]]] = defaultdict(
+            list
+        )
+        self.dialogue: DefaultDict[int, List[Any]] = defaultdict(list)
+        # self.current_instruction = (
+        #     self.env_interface.env.env.env._env.current_episode.instruction
+        # )
 
     def __get_combined_frames(self, batch: Dict[str, Any]) -> np.ndarray:
         """
@@ -87,9 +96,11 @@ class DebugVideoUtil:
         frames_concat = np.ascontiguousarray(frames_concat)
 
         for idx, action in hl_actions.items():
-            # text = f"Agent_{id}:{action[0]}[{action[1]}]"
             agent_name = "Human" if str(idx) == "1" else "Robot"
-            text = f"{agent_name}: {action[0]}[{action[1]}]"
+            if len(self.previous_action[idx]) > 1:
+                text = f"{agent_name}: {action[0]}[{action[1]}] (prev: {self.previous_action[idx][-2][0]}[{self.previous_action[idx][-2][1]}])"
+            else:
+                text = f"{agent_name}: {action[0]}[{action[1]}]"
             frames_concat = cv2.putText(
                 frames_concat,
                 text,
@@ -99,6 +110,50 @@ class DebugVideoUtil:
                 (255, 255, 255),
                 2,
             )
+            if not self.previous_action[idx]:
+                self.previous_action[idx].append(action)
+            elif action[0] == "SendMessageTool":
+                self.dialogue[idx].append(action[1])
+            elif self.previous_action[idx][-1] != action:
+                self.previous_action[idx].append(action)
+            elif action[0] == "Done":
+                pass
+
+        for idx, msgs in self.dialogue.items():
+            if not msgs:
+                continue
+            agent_name = "Human" if str(idx) == "1" else "Robot"
+            count = len(msgs)
+            latest_msg = msgs[-1]
+            text = f'{agent_name}[{count}]: "{latest_msg}"'
+            cv2.putText(
+                frames_concat,
+                text,
+                (20, (int(idx)) * 50 + 400),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.75,
+                (255, 255, 255),
+                2,
+            )
+
+        # After Done
+        if len(hl_actions) < self.num_agents:
+            for idx in range(self.num_agents):
+                if idx not in hl_actions:
+                    agent_name = "Human" if str(idx) == "1" else "Robot"
+                    if len(self.previous_action[idx]) > 0:
+                        text = f"{agent_name}: Done, {self.previous_action[idx][-1][0]}[{self.previous_action[idx][-1][1]}]"
+                    else:
+                        text = f"{agent_name}: Done"
+                    frames_concat = cv2.putText(
+                        frames_concat,
+                        text,
+                        (20, (int(idx) + 1) * 50),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.75,
+                        (255, 255, 255),
+                        2,
+                    )
 
         self.frames.append(frames_concat)
         return
@@ -125,6 +180,14 @@ class DebugVideoUtil:
         if play:
             print("     ...playing video, press 'q' to continue...")
             self.play_video(out_file)
+
+    def clear(self) -> None:
+        """
+        Clear the frames and previous action data.
+        """
+        self.frames = []
+        self.previous_action = defaultdict(list)
+        self.dialogue = defaultdict(list)
 
     def play_video(self, filename: str) -> None:
         """

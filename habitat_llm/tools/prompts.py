@@ -396,6 +396,34 @@ Summary:
         return prompt
 
 
+class Message_Gen_Prompt(Prompt):
+    def __init__(self, name, llm_conf) -> None:
+        super().__init__(name, llm_conf)
+        system_tag = llm_conf.get("system_tag", "SYSTEM")
+        eot_tag = llm_conf.get("eot_tag", "EOT")
+        user_tag = llm_conf.get("user_tag", "USER")
+        assistant_tag = llm_conf.get("assistant_tag", "ASSISTANT")
+
+        self._prompt = f"""{system_tag}
+You are an intelligent communication assistant designed to facilitate effective communication between agents. Based on the context provided and the details of the interaction, generate a concise and clear message that can be sent to another agent. Consider the nuances of the situation and ensure the message is polite, direct, and appropriate for the given context.
+
+Use these examples to generate a message based on the new context provided below:
+{eot_tag}
+
+{user_tag}
+Context: <context>
+{eot_tag}
+{assistant_tag}
+Message:
+"""
+
+    def __call__(self, context, verbose=False):
+        prompt = self._prompt.replace("<context>", context)
+        if verbose:
+            print(f"[Message_Gen] {prompt}=")
+        return prompt
+
+
 def get_prompt(prompt_type, llm_conf):
     if prompt_type == "FRT_CG":
         return FRT_CG_Prompt(prompt_type, llm_conf)
@@ -407,5 +435,7 @@ def get_prompt(prompt_type, llm_conf):
         return FAAT_FEW_SHOT_Prompt(prompt_type, llm_conf)
     elif prompt_type == "FRT_FEW_SHOT":
         return FRT_FEW_SHOT_Prompt(prompt_type, llm_conf)
+    elif prompt_type == "Message_Gen":
+        return Message_Gen_Prompt(prompt_type, llm_conf)
     else:
         raise ValueError(f"Prompt type {prompt_type} not recognized")

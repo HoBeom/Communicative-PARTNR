@@ -606,6 +606,7 @@ class LLMPlanner(Planner):
                     agent.uid: self.replan_required for agent in self.agents
                 },
                 "is_done": {agent.uid: self.is_done for agent in self.agents},
+                "responses": {agent.uid: "Done successfully." for agent in self.agents},
             }
             return {}, planner_info, self.is_done
 
@@ -680,6 +681,9 @@ class LLMPlanner(Planner):
                     },
                     "replanned": {agent.uid: True for agent in self.agents},
                     "is_done": {agent.uid: self.is_done for agent in self.agents},
+                    "responses": {
+                        agent.uid: "Done successfully." for agent in self.agents
+                    },
                     "thought": {agent.uid: thought for agent in self.agents},
                     "high_level_actions": {
                         agent.uid: ("Done", None, None) for agent in self.agents

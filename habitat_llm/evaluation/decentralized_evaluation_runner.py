@@ -52,6 +52,7 @@ class DecentralizedEvaluationRunner(EvaluationRunner):
             planner = instantiate(planner_conf)
             planner = planner(env_interface=self.env_interface)
             planner.agents = [self.agents[agent_conf.uid]]
+            self.env_interface.set_planner(agent_conf.uid, planner)  # wake up
             self.planner[agent_conf.uid] = planner
             if (
                 "planning_mode" in planner_conf.plan_config
